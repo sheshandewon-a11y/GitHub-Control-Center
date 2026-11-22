@@ -1,0 +1,11 @@
+# Manual smoke checklist
+- [ ] Create a workspace user and verify email.
+- [ ] Sign in and sign out.
+- [ ] Confirm unauthenticated API requests return 401.
+- [ ] Configure GitHub OAuth callback URL exactly.
+- [ ] Connect two different GitHub accounts.
+- [ ] Verify tokens do not appear in browser network responses.
+- [ ] Load repositories, branches, pull requests and Actions.
+- [ ] Cancel disconnect confirmation and verify account remains.
+- [ ] Confirm disconnect and verify account disappears.
+- [ ] Test mobile navigation and responsive account list.
