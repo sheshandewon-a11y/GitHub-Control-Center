@@ -1,57 +1,49 @@
-# GitHub Control Center
+# GitHub Control Center — update package
 
-React + TypeScript + Vite frontend, Vercel serverless API, Supabase Auth/Postgres and GitHub OAuth.
+This update preserves the existing Supabase email/password authentication, GitHub OAuth callback, encrypted server-side GitHub tokens, Vercel API route and dashboard design.
 
-## Included
-- Private workspace login with Supabase email/password authentication.
-- Multi-account GitHub OAuth connection.
-- Encrypted GitHub access tokens stored only in Supabase and decrypted only in the Vercel function.
-- Accounts, repositories, branches, pull requests and GitHub Actions read views.
-- Disconnect confirmation before revoking a GitHub OAuth token.
-- Responsive dark control-center UI.
+## Included in this update
+- Multi-account selector and disconnect
+- Repository listing and create
+- Repository description / visibility edit
+- Branch listing
+- File and folder browser
+- Text file editor with commit
+- ZIP upload for source/text files, preserving nested folders
+- If the ZIP contains exactly one common top-level folder, that wrapper folder is stripped
+- Existing pull request and Actions read views
 
-## 1. Install and run
-```bash
-npm install
-cp .env.example .env.local
-npm run dev
-```
-Fill in the Supabase browser URL and publishable key in `.env.local`.
+## Important ZIP upload limitation
+This first implementation handles UTF-8 text/source files. Binary assets (images, fonts, compiled files, etc.) are rejected rather than silently corrupted. The GitHub REST contents API supports binary blobs, but a separate binary-safe upload flow should be added before relying on ZIP uploads containing binary assets.
 
-## 2. Supabase
-1. Open the `github-control-center` Supabase project.
-2. Open SQL Editor and run `supabase/migrations/202611220001_github_control_center.sql`.
-3. In Authentication > Providers, enable Email.
-4. In Authentication > URL Configuration, set Site URL to your Vercel URL and add local + Vercel callback origins to the redirect allow list as required.
-5. Create a Supabase secret key for server-side use. Never put it in a `VITE_` variable.
+## Setup
+1. Replace the repository files with the matching files in this ZIP.
+2. Keep your current Vercel and Supabase environment variables. Do not overwrite them with `.env.example`.
+3. Install dependencies with `npm install`.
+4. Run `npm run build` locally.
+5. Upload/commit the changes to the GitHub repository's production branch.
+6. Wait for the Vercel deployment to finish.
 
-## 3. GitHub OAuth App
-Create/configure a GitHub OAuth App:
-- Homepage URL: your Vercel project URL
-- Authorization callback URL: `https://YOUR_DOMAIN/api/github/callback`
+## Existing environment variables
+Frontend:
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_PUBLISHABLE_KEY`
 
-The callback URL must match exactly.
+Vercel server-side:
+- `SUPABASE_URL`
+- `SUPABASE_SECRET_KEY`
+- `APP_URL` (no trailing slash)
+- `GITHUB_CLIENT_ID`
+- `GITHUB_CLIENT_SECRET`
+- `GITHUB_TOKEN_ENCRYPTION_KEY` (at least 32 bytes)
 
-## 4. Vercel environment variables
-Add these in Project Settings > Environment Variables for Production, Preview and Development:
-- `VITE_SUPABASE_URL` (public)
-- `VITE_SUPABASE_PUBLISHABLE_KEY` (public)
-- `SUPABASE_URL` (server only)
-- `SUPABASE_SECRET_KEY` (server only)
-- `GITHUB_CLIENT_ID` (server only)
-- `GITHUB_CLIENT_SECRET` (server only)
-- `GITHUB_TOKEN_ENCRYPTION_KEY` (server only; at least 32 random bytes)
-- `APP_URL` (server only; public site origin, no trailing slash)
+GitHub OAuth callback URL must remain:
+`https://github-control-center.vercel.app/api/github/callback`
 
-Generate an encryption key locally, e.g. `openssl rand -base64 48`. Keep it stable: changing it makes already stored tokens unreadable unless they are re-encrypted.
+## OAuth permissions
+The current OAuth scope remains `repo workflow read:user user:email`. Repository create/edit and file writes require write access to the target repository. Repository deletion is intentionally not exposed in the UI.
 
-## 5. Deploy
-Import this repository into Vercel, select the `nexus` team and the existing `github-control-center` project. Framework Vite, build `npm run build`, output `dist`. Add environment variables before first production deployment.
-
-## Security notes
-- Supabase secret key is only read by the Vercel function. Never expose it to browser code.
-- GitHub tokens are AES-256-GCM encrypted before database storage.
-- The API verifies Supabase user JWTs on protected routes and scopes account queries to that user.
-- OAuth state is random, single-use and expires after ten minutes.
-- This is the initial migration baseline. Before public production use, add rate limiting, CSRF/origin controls, stronger audit coverage, and test OAuth end-to-end with a dedicated test account.
-- GitHub write operations are intentionally not included in this baseline. Add them only with explicit per-action confirmation and audit logging.
+## Notes
+- Keep the existing Supabase tables and `consume_github_oauth_state` RPC.
+- No database schema migration is required for this phase.
+- Do not expose `SUPABASE_SECRET_KEY`, GitHub OAuth secret, or token encryption key in frontend variables.
