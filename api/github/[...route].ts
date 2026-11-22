@@ -27,6 +27,10 @@ const supabase = createClient(supabaseUrl, supabaseSecretKey, {
 
 const callbackUrl = `${appUrl}/api/github/callback`;
 
+// --------------------------------------------------
+// ENCRYPTION
+// --------------------------------------------------
+
 function encryptionKey() {
   const secret = process.env.GITHUB_TOKEN_ENCRYPTION_KEY;
 
@@ -49,7 +53,12 @@ function encryptionKey() {
 
 function encrypt(token: string) {
   const iv = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', encryptionKey(), iv);
+
+  const cipher = createCipheriv(
+    'aes-256-gcm',
+    encryptionKey(),
+    iv
+  );
 
   const encrypted = Buffer.concat([
     cipher.update(token, 'utf8'),
@@ -74,13 +83,21 @@ function decrypt(value: {
     Buffer.from(value.iv, 'base64')
   );
 
-  decipher.setAuthTag(Buffer.from(value.tag, 'base64'));
+  decipher.setAuthTag(
+    Buffer.from(value.tag, 'base64')
+  );
 
   return Buffer.concat([
-    decipher.update(Buffer.from(value.data, 'base64')),
+    decipher.update(
+      Buffer.from(value.data, 'base64')
+    ),
     decipher.final(),
   ]).toString('utf8');
 }
+
+// --------------------------------------------------
+// AUTHENTICATION
+// --------------------------------------------------
 
 async function owner(req: VercelRequest) {
   const authorization = req.headers.authorization || '';
@@ -90,21 +107,27 @@ async function owner(req: VercelRequest) {
     : '';
 
   if (!jwt) {
-    throw Object.assign(new Error('Sign in required.'), {
-      status: 401,
-    });
+    throw Object.assign(
+      new Error('Sign in required.'),
+      { status: 401 }
+    );
   }
 
   const { data, error } = await supabase.auth.getUser(jwt);
 
   if (error || !data.user) {
-    throw Object.assign(new Error('Session is invalid.'), {
-      status: 401,
-    });
+    throw Object.assign(
+      new Error('Session is invalid.'),
+      { status: 401 }
+    );
   }
 
   return data.user.id;
 }
+
+// --------------------------------------------------
+// GITHUB API REQUEST
+// --------------------------------------------------
 
 async function githubRequest(
   token: string,
@@ -112,23 +135,28 @@ async function githubRequest(
   method = 'GET',
   body?: unknown
 ) {
-  const response = await fetch(`https://api.github.com${path}`, {
-    method,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-      'User-Agent': 'GitHub-Control-Center',
-      'Content-Type': 'application/json',
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const response = await fetch(
+    `https://api.github.com${path}`,
+    {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'GitHub-Control-Center',
+        'Content-Type': 'application/json',
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    }
+  );
 
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
     throw Object.assign(
-      new Error((data as any).message || 'GitHub API error.'),
+      new Error(
+        (data as any).message || 'GitHub API error.'
+      ),
       { status: response.status }
     );
   }
@@ -139,7 +167,14 @@ async function githubRequest(
   };
 }
 
-async function getAccount(userId: string, id: string) {
+// --------------------------------------------------
+// GET ACCOUNT
+// --------------------------------------------------
+
+async function getAccount(
+  userId: string,
+  id: string
+) {
   const { data, error } = await supabase
     .from('github_accounts')
     .select('*')
@@ -148,33 +183,57 @@ async function getAccount(userId: string, id: string) {
     .single();
 
   if (error || !data) {
-    throw Object.assign(new Error('GitHub account not found.'), {
-      status: 404,
-    });
+    throw Object.assign(
+      new Error('GitHub account not found.'),
+      { status: 404 }
+    );
   }
 
   return data;
 }
 
+// --------------------------------------------------
+// REDIRECT
+// --------------------------------------------------
+
 function redirectUrl(status: string) {
   return `${appUrl}/?github=${encodeURIComponent(status)}`;
 }
+
+// --------------------------------------------------
+// MAIN HANDLER
+// --------------------------------------------------
 
 export default async function handler(
   req: VercelRequest,
   res: VercelResponse
 ) {
-  // Vercel catch-all route parameters can be arrays.
+
+  // --------------------------------------------------
+  // ROUTE DETECTION - UPDATED
+  // --------------------------------------------------
+
   const routeParam = req.query.route;
+
+  const requestPath = new URL(
+    req.url || '/',
+    'https://control-center.local'
+  ).pathname;
+
+  const pathRoute = requestPath
+    .replace(/^\/api\/github\/?/, '')
+    .replace(/\/+$/, '');
 
   const route = Array.isArray(routeParam)
     ? routeParam.join('/')
-    : String(routeParam || '');
+    : String(routeParam || pathRoute || '');
 
   let userId: string | null = null;
 
-  // OAuth callback is the only route that does not require an existing
-  // Supabase access token.
+  // --------------------------------------------------
+  // AUTHENTICATION EXCEPT OAUTH CALLBACK
+  // --------------------------------------------------
+
   if (route !== 'callback') {
     try {
       userId = await owner(req);
@@ -186,6 +245,7 @@ export default async function handler(
   }
 
   try {
+
     // --------------------------------------------------
     // STATUS
     // --------------------------------------------------
@@ -207,12 +267,15 @@ export default async function handler(
     // --------------------------------------------------
 
     if (route === 'connect' && req.method === 'POST') {
+
       if (
         !process.env.GITHUB_CLIENT_ID ||
         !process.env.GITHUB_CLIENT_SECRET
       ) {
         throw Object.assign(
-          new Error('GitHub OAuth secrets are not configured in Vercel.'),
+          new Error(
+            'GitHub OAuth secrets are not configured in Vercel.'
+          ),
           { status: 400 }
         );
       }
@@ -224,7 +287,9 @@ export default async function handler(
         .insert({
           state,
           user_id: userId,
-          expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+          expires_at: new Date(
+            Date.now() + 10 * 60 * 1000
+          ).toISOString(),
         });
 
       if (error) {
@@ -249,30 +314,43 @@ export default async function handler(
     // --------------------------------------------------
 
     if (route === 'callback' && req.method === 'GET') {
+
       const state = String(req.query.state || '');
       const code = String(req.query.code || '');
 
       if (!state) {
-        return res.redirect(redirectUrl('state_expired'));
+        return res.redirect(
+          redirectUrl('state_expired')
+        );
       }
 
-      // Atomic one-time state consumption.
-      // The SQL function deletes and returns the matching state
-      // in a single database operation.
-      const { data: consumed, error: consumeError } =
-        await supabase.rpc('consume_github_oauth_state', {
+      // Consume OAuth state once.
+
+      const {
+        data: consumed,
+        error: consumeError,
+      } = await supabase.rpc(
+        'consume_github_oauth_state',
+        {
           p_state: state,
-        });
+        }
+      );
 
       const savedState = consumed?.[0];
 
       if (consumeError || !savedState) {
-        return res.redirect(redirectUrl('state_expired'));
+        return res.redirect(
+          redirectUrl('state_expired')
+        );
       }
 
       if (!code || req.query.error) {
-        return res.redirect(redirectUrl('denied'));
+        return res.redirect(
+          redirectUrl('denied')
+        );
       }
+
+      // Exchange OAuth code.
 
       const tokenResponse = await fetch(
         'https://github.com/login/oauth/access_token',
@@ -293,9 +371,16 @@ export default async function handler(
 
       const tokenData: any = await tokenResponse.json();
 
-      if (!tokenResponse.ok || !tokenData.access_token) {
-        return res.redirect(redirectUrl('token_exchange_failed'));
+      if (
+        !tokenResponse.ok ||
+        !tokenData.access_token
+      ) {
+        return res.redirect(
+          redirectUrl('token_exchange_failed')
+        );
       }
+
+      // Get GitHub profile.
 
       const profileResponse = await githubRequest(
         tokenData.access_token,
@@ -303,6 +388,8 @@ export default async function handler(
       );
 
       const profile: any = profileResponse.data;
+
+      // Prepare encrypted account record.
 
       const record = {
         user_id: savedState.user_id,
@@ -316,7 +403,9 @@ export default async function handler(
         scopes: String(tokenData.scope || '')
           .split(/[ ,]+/)
           .filter(Boolean),
-        encrypted_token: encrypt(tokenData.access_token),
+        encrypted_token: encrypt(
+          tokenData.access_token
+        ),
         updated_at: new Date().toISOString(),
       };
 
@@ -327,11 +416,19 @@ export default async function handler(
         });
 
       if (saveError) {
-        console.error('GitHub account save failed:', saveError);
-        return res.redirect(redirectUrl('save_failed'));
+        console.error(
+          'GitHub account save failed:',
+          saveError
+        );
+
+        return res.redirect(
+          redirectUrl('save_failed')
+        );
       }
 
-      return res.redirect(redirectUrl('connected'));
+      return res.redirect(
+        redirectUrl('connected')
+      );
     }
 
     // --------------------------------------------------
@@ -339,13 +436,16 @@ export default async function handler(
     // --------------------------------------------------
 
     if (route === 'accounts' && req.method === 'GET') {
+
       const { data, error } = await supabase
         .from('github_accounts')
         .select(
           'id,github_id,login,name,email,avatar_url,profile_url,account_type,scopes,connected_at'
         )
         .eq('user_id', userId)
-        .order('connected_at', { ascending: true });
+        .order('connected_at', {
+          ascending: true,
+        });
 
       if (error) {
         throw error;
@@ -364,26 +464,38 @@ export default async function handler(
       route.startsWith('accounts/') &&
       req.method === 'DELETE'
     ) {
+
       const id = route.split('/')[1];
 
       if (!id) {
-        throw Object.assign(new Error('Account ID is required.'), {
-          status: 400,
-        });
+        throw Object.assign(
+          new Error('Account ID is required.'),
+          { status: 400 }
+        );
       }
 
-      const account = await getAccount(userId!, id);
-      const token = decrypt(account.encrypted_token);
+      const account = await getAccount(
+        userId!,
+        id
+      );
+
+      const token = decrypt(
+        account.encrypted_token
+      );
 
       const clientId = process.env.GITHUB_CLIENT_ID;
       const clientSecret = process.env.GITHUB_CLIENT_SECRET;
 
       if (!clientId || !clientSecret) {
         throw Object.assign(
-          new Error('GitHub OAuth credentials are not configured.'),
+          new Error(
+            'GitHub OAuth credentials are not configured.'
+          ),
           { status: 500 }
         );
       }
+
+      // Revoke GitHub OAuth token.
 
       const revokeResponse = await fetch(
         `https://api.github.com/applications/${encodeURIComponent(
@@ -394,7 +506,9 @@ export default async function handler(
           headers: {
             Authorization:
               'Basic ' +
-              Buffer.from(`${clientId}:${clientSecret}`).toString('base64'),
+              Buffer.from(
+                `${clientId}:${clientSecret}`
+              ).toString('base64'),
             Accept: 'application/vnd.github+json',
             'Content-Type': 'application/json',
           },
@@ -432,35 +546,56 @@ export default async function handler(
     }
 
     // --------------------------------------------------
-    // REPOSITORIES / BRANCHES / PULL REQUESTS / ACTIONS
+    // REPOSITORIES / BRANCHES / PULLS / ACTIONS
     // --------------------------------------------------
 
     if (
-      ['repositories', 'branches', 'pulls', 'actions'].includes(route) &&
+      [
+        'repositories',
+        'branches',
+        'pulls',
+        'actions',
+      ].includes(route) &&
       req.method === 'GET'
     ) {
+
       const accountId = String(
-        req.query.accountId || req.query.id || ''
+        req.query.accountId ||
+        req.query.id ||
+        ''
       );
 
       if (!accountId) {
-        throw Object.assign(new Error('Account ID is required.'), {
-          status: 400,
-        });
+        throw Object.assign(
+          new Error('Account ID is required.'),
+          { status: 400 }
+        );
       }
 
-      const account = await getAccount(userId!, accountId);
-      const token = decrypt(account.encrypted_token);
+      const account = await getAccount(
+        userId!,
+        accountId
+      );
 
+      const token = decrypt(
+        account.encrypted_token
+      );
+
+      // ------------------------------------------------
       // REPOSITORIES
+      // ------------------------------------------------
+
       if (route === 'repositories') {
+
         const result = await githubRequest(
           token,
           '/user/repos?visibility=all&affiliation=owner,collaborator,organization_member&sort=updated&per_page=100'
         );
 
         return res.json({
-          repositories: (result.data as any[]).map((repo) => ({
+          repositories: (
+            result.data as any[]
+          ).map((repo) => ({
             id: repo.id,
             name: repo.name,
             full_name: repo.full_name,
@@ -476,11 +611,16 @@ export default async function handler(
       }
 
       // Validate repository owner/name.
-      const fullName = String(req.query.repository || '');
+
+      const fullName = String(
+        req.query.repository || ''
+      );
 
       if (!/^[\w.-]+\/[\w.-]+$/.test(fullName)) {
         throw Object.assign(
-          new Error('Valid owner/repository required.'),
+          new Error(
+            'Valid owner/repository required.'
+          ),
           { status: 400 }
         );
       }
@@ -490,15 +630,21 @@ export default async function handler(
         .map(encodeURIComponent)
         .join('/');
 
+      // ------------------------------------------------
       // BRANCHES
+      // ------------------------------------------------
+
       if (route === 'branches') {
+
         const result = await githubRequest(
           token,
           `/repos/${repositoryPath}/branches?per_page=100`
         );
 
         return res.json({
-          branches: (result.data as any[]).map((branch) => ({
+          branches: (
+            result.data as any[]
+          ).map((branch) => ({
             name: branch.name,
             protected: branch.protected,
             commitSha: branch.commit.sha,
@@ -506,15 +652,21 @@ export default async function handler(
         });
       }
 
+      // ------------------------------------------------
       // PULL REQUESTS
+      // ------------------------------------------------
+
       if (route === 'pulls') {
+
         const result = await githubRequest(
           token,
           `/repos/${repositoryPath}/pulls?state=open&per_page=50`
         );
 
         return res.json({
-          pullRequests: (result.data as any[]).map((pull) => ({
+          pullRequests: (
+            result.data as any[]
+          ).map((pull) => ({
             id: pull.id,
             number: pull.number,
             title: pull.title,
@@ -530,15 +682,21 @@ export default async function handler(
         });
       }
 
+      // ------------------------------------------------
       // GITHUB ACTIONS
+      // ------------------------------------------------
+
       if (route === 'actions') {
+
         const result = await githubRequest(
           token,
           `/repos/${repositoryPath}/actions/runs?per_page=30`
         );
 
         return res.json({
-          runs: (result.data as any).workflow_runs || [],
+          runs: (
+            result.data as any
+          ).workflow_runs || [],
         });
       }
     }
@@ -547,7 +705,10 @@ export default async function handler(
     // METHOD NOT ALLOWED / UNKNOWN ROUTE
     // --------------------------------------------------
 
-    const allowedMethods: Record<string, string[]> = {
+    const allowedMethods: Record<
+      string,
+      string[]
+    > = {
       status: ['GET'],
       connect: ['POST'],
       callback: ['GET'],
@@ -564,7 +725,9 @@ export default async function handler(
 
     if (
       allowedMethods[baseRoute] &&
-      !allowedMethods[baseRoute].includes(req.method || '')
+      !allowedMethods[baseRoute].includes(
+        req.method || ''
+      )
     ) {
       res.setHeader(
         'Allow',
@@ -578,12 +741,23 @@ export default async function handler(
 
     return res.status(404).json({
       error: 'API route not found.',
+      route,
+      method: req.method,
     });
-  } catch (error: any) {
-    console.error('GitHub API error:', error);
 
-    return res.status(error.status || 500).json({
-      error: error.message || 'Unexpected server error.',
+  } catch (error: any) {
+
+    console.error(
+      'GitHub API error:',
+      error
+    );
+
+    return res.status(
+      error.status || 500
+    ).json({
+      error:
+        error.message ||
+        'Unexpected server error.',
     });
   }
 }
